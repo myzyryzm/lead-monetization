@@ -11,3 +11,6 @@ anthropic>=0.40
 flask>=3.0
 flask-cors>=4.0
 python-dotenv>=1.0    # load ANTHROPIC_API_KEY from backend/.env
+
+# Production server
+gunicorn>=23.0

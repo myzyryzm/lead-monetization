@@ -1,0 +1,26 @@
+# VCS / tooling
+.git
+.claude
+.gitignore
+.dockerignore
+Dockerfile
+build.sh
+ecr-commands.txt
+*.md
+
+# Secrets — never bake into the image; inject ANTHROPIC_API_KEY at runtime
+.env
+backend/.env
+
+# Python
+.venv
+backend/.venv
+**/__pycache__
+*.py[cod]
+
+# Frontend — dist is rebuilt inside the image (stage 1)
+frontend/node_modules
+frontend/dist
+
+# NOTE: backend/model.pkl and the CSVs are intentionally NOT ignored —
+# they ship in the image so startup loads the model instead of retraining.
