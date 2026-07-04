@@ -187,3 +187,73 @@ Copy generation stays on the cheaper `claude-haiku-4-5`; the reasoning/orchestra
 - **Model persistence** pins `scikit-learn==1.9.0` so `model.pkl` unpickles under the same version; it retrains automatically if the pickle can't load.
 - **Performance:** lead scoring is vectorized (one `predict_proba` over all leads per offer) — output is identical to the original per-lead loop, just far faster on the chat hot path.
 - **Not built for this MVP** (see `backend/README.md`): token streaming, prompt caching, a production WSGI server (gunicorn/waitress), and connecting the agent to a real ESP/SMS platform for dispatch.
+
+---
+
+## 1. What does this tool do?
+
+It's a lead monetization engine with a chat interface. A media buyer describes a campaign in plain
+English — _"we signed an auto-insurance offer paying \$22/lead, who do we send it to and what's the
+revenue from 500 sends?"_ — and an AI agent answers with grounded numbers: which leads to target,
+projected revenue, the lift versus random targeting, and drafted email/SMS copy.
+
+Under the hood, a calibrated logistic regression scores every lead–offer pair for conversion
+probability, and offers are ranked by expected value (`EV = P(convert) × payout`). Calibration
+matters because the output is dollars — a predicted probability has to be a _real_ probability for
+the revenue projection to mean anything. The core design principle is that **the model does the math
+and the LLM does the language**: the agent never invents a number, it only calls tools (list offers,
+estimate a campaign, recommend offers for a lead, draft copy), so every figure in an answer traces
+back to the model. It works in both directions — offer → which leads are worth sending to under a
+send budget or EV floor, and lead → which offers are worth showing them.
+
+The data (2,000 leads, 15 offers, all outcomes) is synthetic and clearly labeled as such; the
+pipeline retrains unchanged on real data.
+
+## 2. Why did I build this one?
+
+The brief says the point of the role is to "build whatever unlocks the most value for the media
+buying operation" — and the examples given (video creative generator, ad upload via MCP, landing
+page generator) all sit on the **acquisition** side: getting leads in cheaper. That side is already
+being actively built.
+
+The business model is buy media → capture leads (cost) → send affiliate offers (revenue). The
+**revenue side** — monetizing the leads you already have — is where the margin actually lives, and
+nothing in the brief addressed it. Every lead has an acquisition cost; the business only profits if
+revenue from that lead exceeds it, and the decision driving that revenue is _"of everything we could
+send this lead, what maximizes expected value — and is it even worth a send?"_ That's a decision
+currently made by intuition, and it's exactly the kind of decision a calibrated model makes better
+than a human at scale.
+
+The role description also says the right person "walks in and starts seeing opportunities I haven't
+articulated yet." So instead of building a fourth version of something already on the list, I built
+the thing the list was missing — and built it the way I'd argue AI tools should be built for an
+ROI-driven business: the ML model owns every number, the LLM owns parsing, orchestration, and copy,
+and the agent makes the whole thing usable by a media buyer in plain English.
+
+## 3. What would I build next if this was my full-time job?
+
+I'd close three loops, in order:
+
+**1. Close the data loop — the retraining flywheel.** Right now the model trains once on historical
+outcomes. But every campaign the tool recommends generates new labeled data: each send either
+converts or doesn't. I'd build the loop where send outcomes flow back in and the model retrains on a
+regular cadence — so the tool literally gets smarter every time it's used, on the company's own
+campaign data. The two real engineering problems are conversion windows (slow-converting offer types
+would otherwise get mislabeled as failures if you retrain too early) and tolerance for
+postback/attribution loss. Alongside this, add conversion-history features (prior conversions,
+recency, last category) — proven responders convert at multiples of the base rate, and it's likely
+the single biggest model lift available.
+
+**2. Close the execution loop — MCP dispatch.** Connect the agent to the actual ESP/SMS platform via
+an MCP server so "who should get this offer?" becomes "queue it up" — with a human-approval gate
+before anything sends. This plugs directly into the MCP work the team is already doing on the
+ad-upload side.
+
+**3. Close the business loop — feed monetization back into media buying.** Once the model knows the
+expected lifetime revenue of a lead by source, campaign, and creative, you can score _acquisition_
+channels by the revenue their leads actually produce — not by cost-per-lead. That turns media buying
+from "which source is cheapest" into "which source is most profitable," which is the whole ROI game.
+
+Beyond the loops: send-time/channel/frequency optimization per lead (fatigue modeling), an LLM copy
+A/B loop where winning variants feed back into generation, licensed lead enrichment for thin leads,
+and a hard eligibility filter that parses plain-text offer rules.
