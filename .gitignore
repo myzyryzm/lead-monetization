@@ -14,4 +14,3 @@ backend/model.pkl
 # Frontend
 frontend/node_modules/
 frontend/dist/
-ecr-commands.txt
