@@ -95,50 +95,13 @@ python llm_layer.py
 
 ---
 
-## The learning flywheel (built)
-
-`flywheel.py` turns the static engine into the loop that actually compounds in production:
-you only learn the outcome of a (lead, offer) you **send**, so sends are training data and the
-model should improve round over round. It reuses the engine's own hidden-truth world (from
-`generate.py`, minus the per-draw noise so the oracle/regret are exact) and the production feature
-pipeline (from `recommend.py`), then races five allocation policies over many rounds:
-
-| policy | what it does |
-|---|---|
-| **oracle** | sends by *true* EV — the perfect-information ceiling / regret baseline |
-| **thompson** | flywheel + **bootstrapped Thompson-sampling** exploration (an ensemble of models on bootstrap resamples; each lead acts on one randomly drawn head, so under-sampled regions get explored) |
-| **greedy** | flywheel, exploit-only (retrain, send the model's top-K EV) |
-| **static** | trained once on the cold-start sample, never retrained — isolates "no flywheel" |
-| **random** | random sends — the floor |
-
-**What it shows** (robust across seeds): the flywheel captures **~90% of the oracle's revenue**,
-beating the frozen model by ~40% and random blasting by ~4–5×; and **exploration buys a
-demonstrably more accurate model** (lowest EV-error, no blind spots) — the honest finding is that on
-a *stationary* world greedy stays revenue-competitive because a feature-generalizing linear model
-transfers information across leads, so exploration's payoff here is model accuracy (insurance against
-drift), visualized as a per-segment blind-spot heatmap where greedy develops hot cells the explorer
-does not.
-
-```bash
-python flywheel.py                      # 24 rounds; writes flywheel_results.csv + flywheel_report.html
-python flywheel.py --reps 3 --seed 11   # average seeds for a stable headline
-python flywheel.py --rounds 30 --budget 500 --ensemble 10 --retrain-every 2 --postback 0.85
-```
-
-It also runs live in the app — the **Learning flywheel** tab (`POST /api/flywheel`) runs the sim
-server-side and animates the same charts in-browser. That tab is **behind a feature flag and off by
-default**: it shows a "coming soon" explanation until you start the server with
-`ENABLE_FLYWHEEL=true` (the route returns 503 and `/api/config` reports `flywheel_enabled: false`
-while disabled). The CLI above always works regardless of the flag. See the whole-app
-[`README.md`](../README.md) for the architecture.
-
 ## What's next (production design)
 
 Things deliberately left as roadmap rather than built, because a working core plus a clear roadmap beats a half-built everything:
 
 - **Agent orchestration layer** — natural-language interface over the tools (`recommend`, `target_offer`, `budget_lift`, `generate_copy`). The agent earns its place only on open-ended requests where the tool sequence genuinely varies; deterministic steps stay deterministic.
 - **Conversion history as features** — prior-conversion count, recency, last category. Proven responders convert far more; this is likely the single biggest model-lift available, though the data is noisy (postback-dependent).
-- **The learning flywheel** — ✅ **built** as a simulation (`flywheel.py`) — see [The learning flywheel](#the-learning-flywheel-built) below. Sends generate new labeled outcomes that retrain the model; the sim demonstrates **exploration** (Thompson sampling, so the policy doesn't trap its early assumptions), **batched** retraining, and postback/attribution loss. A conversion **window** per offer type (slow converters mislabeled as negatives) remains a production concern the sim notes but doesn't yet model.
+- **Continuous retraining on send outcomes** — every send generates a new labeled outcome (converted / didn't), so the model should be retrained on its own campaign data on a regular cadence. Needs a conversion **window** per offer type (slow converters would otherwise be mislabeled as negatives) and tolerance for postback/attribution loss.
 - **Execution via MCP** — connect to the ESP/SMS platform so the agent dispatches campaigns directly, with a human-approval gate before autonomous sends.
 - **Lead enrichment** — append demographics/interests to thin leads via a **licensed** enrichment vendor (not DIY social scraping, which carries ToS and privacy exposure).
 - **Eligibility filter** — hard end-stage gate (LLM parses plain-text offer rules), applied after scoring, on the fields actually collected.

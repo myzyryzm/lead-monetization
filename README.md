@@ -6,10 +6,9 @@ offer paying \$22/lead, who do we send it to and what's the revenue from 500 sen
 agent routes the question through the ML model and answers with **grounded numbers**: which leads to
 target, projected revenue, and the email/SMS copy to send.
 
-- **React frontend** — an assumptions panel that explains the model, a back-and-forth chat, and a **Learning flywheel** tab.
-- **Flask backend** — serve the built frontend, answer chat queries, and run the flywheel simulation.
+- **React frontend** — an assumptions panel that explains the model and a back-and-forth chat.
+- **Flask backend** — serve the built frontend and answer chat queries.
 - **AI agent** — deciphers the request, calls the ML tools (never invents numbers), and replies in natural language.
-- **Learning flywheel** — a simulation (standalone `flywheel.py` + an in-app tab, a **preview behind `ENABLE_FLYWHEEL`, off by default**) that shows the model compounding as sends become training data, and why exploration (a Thompson-sampling bandit) beats pure greed. See [`backend/README.md`](backend/README.md#the-learning-flywheel-built).
 
 > **Note:** All data (2000 leads, 15 offers, every conversion outcome) is **randomly generated**.
 > This is an MVP demonstrating the agentic integration, not a system trained on real data. See
@@ -62,8 +61,6 @@ its-media-today/
 │   ├── model_store.py        ← train-once / persist to model.pkl (joblib)
 │   ├── recommend.py          ← lead → ranked offers by EV  (+ vectorized scoring)
 │   ├── costs.py              ← offer → who to send to, under a send budget/EV floor
-│   ├── flywheel.py           ← learning-flywheel + bandit sim (5 policies; CLI + /api/flywheel)
-│   ├── flywheel_report.py    ← flywheel results → self-contained HTML report (inline SVG)
 │   ├── llm_layer.py          ← email/SMS copy generation (claude-haiku-4-5 + fallback)
 │   ├── generate.py, train.py ← synthetic-data generation & standalone model training
 │   ├── leads.csv, offers.csv, pairs.csv   ← generated data
@@ -73,15 +70,13 @@ its-media-today/
     ├── index.html
     ├── package.json, vite.config.js
     ├── src/
-    │   ├── main.jsx, App.jsx  ← App.jsx = two-tab switcher (estimator / flywheel)
-    │   ├── api.js             ← fetchAssumptions() / sendChat() / runFlywheel()
+    │   ├── main.jsx, App.jsx
+    │   ├── api.js             ← fetchAssumptions() / sendChat()
     │   ├── markdown.js        ← sanitized (escape-first) markdown renderer
     │   ├── styles.css
     │   └── components/
     │       ├── AssumptionsPanel.jsx
-    │       ├── Chat.jsx
-    │       ├── FlywheelPanel.jsx  ← controls, KPIs, animated charts, thesis checks
-    │       └── charts.jsx         ← inline-SVG LineChart + Heatmap (hover tooltips)
+    │       └── Chat.jsx
     └── dist/                 ← `npm run build` output, served by Flask (gitignored)
 ```
 
@@ -153,15 +148,6 @@ The chat handles both directions of the monetization decision. Try:
 The agent states the **assumptions it made** (the assumed `commitment_level` and channel) and cites
 tool-derived figures — e.g. _"~\$1,721 from 500 email sends, 1.83× a random 500."_
 
-The **Learning flywheel** tab runs the retrain-on-your-own-sends loop live: press **Run simulation**
-to race five allocation policies over N rounds and watch the cumulative-revenue chart, the model's
-accuracy improving, and the per-segment blind-spot map fill in. This tab is a **preview, off by
-default** — it shows a "coming soon" explanation until you start the server with `ENABLE_FLYWHEEL=true`:
-
-```bash
-ENABLE_FLYWHEEL=true python app.py
-```
-
 ---
 
 ## HTTP API
@@ -170,8 +156,6 @@ ENABLE_FLYWHEEL=true python app.py
 | ------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/api/assumptions` | Catalog summary (categories, offers, payout ranges, commitment ladder) + prose disclaimers. Powers the assumptions panel.                                                                                                                                                                      |
 | `POST` | `/api/chat`        | Body `{ "messages": [{ "role": "user", "content": "..." }] }`. Runs the agent, returns `{ reply, messages }` where `messages` is the full plain-text history.                                                                                                                                  |
-| `GET`  | `/api/config`      | Feature flags the SPA reads on load, e.g. `{ "flywheel_enabled": false }`.                                                                                                                                                                                                                     |
-| `POST` | `/api/flywheel`    | Body `{ rounds, budget, ensemble, seed, ... }` (all optional, clamped). Runs the flywheel/bandit simulation server-side and returns per-round series, summary, blind-spot heatmaps, and thesis checks. **Needs no API key**, but is **gated behind `ENABLE_FLYWHEEL` (off by default → 503).** |
 | `*`    | `/<path>`          | Serves the built SPA (real file if it exists, else `index.html` for client routing).                                                                                                                                                                                                           |
 
 ```bash

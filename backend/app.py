@@ -42,66 +42,11 @@ ASSUMPTION_NOTES = [
 ]
 
 
-def flywheel_enabled():
-    """Feature flag for the learning-flywheel simulation. Off by default — set
-    ENABLE_FLYWHEEL=true (or 1/yes/on) in the environment to turn it on."""
-    return os.environ.get("ENABLE_FLYWHEEL", "false").strip().lower() in (
-        "1", "true", "yes", "on")
-
-
-@app.route("/api/config")
-def config():
-    """Feature flags the SPA reads on load (e.g. whether to show the flywheel tab
-    as live or as 'coming soon')."""
-    return jsonify({"flywheel_enabled": flywheel_enabled()})
-
-
 @app.route("/api/assumptions")
 def assumptions():
     summary = data.catalog_summary()
     summary["notes"] = ASSUMPTION_NOTES
     return jsonify(summary)
-
-
-# Web-facing clamps, tighter than flywheel.CAPS, so a browser click can't queue a
-# minute-long compute. simulate() clamps again to the module's hard caps.
-_FLY_WEB = {"rounds": (4, 36), "budget": (50, 800), "ensemble": (2, 12),
-            "warmstart": (0, 1500), "retrain_every": (1, 6)}
-
-
-@app.route("/api/flywheel", methods=["POST"])
-def flywheel_run():
-    """Run the learning-flywheel + bandit simulation and return its series.
-    Pure ML/simulation — needs no ANTHROPIC_API_KEY, so it works even when
-    /api/chat can't. Gated behind the ENABLE_FLYWHEEL feature flag."""
-    if not flywheel_enabled():
-        return jsonify({"error": "The flywheel simulation is not enabled on this "
-                                 "server (set ENABLE_FLYWHEEL=true)."}), 503
-    import flywheel
-    body = request.get_json(silent=True) or {}
-    cfg = {}
-    for k, (lo, hi) in _FLY_WEB.items():
-        if body.get(k) is not None:
-            try:
-                cfg[k] = min(max(int(body[k]), lo), hi)
-            except (TypeError, ValueError):
-                return jsonify({"error": f"'{k}' must be an integer"}), 400
-    if body.get("postback") is not None:
-        try:
-            cfg["postback"] = min(max(float(body["postback"]), 0.1), 1.0)
-        except (TypeError, ValueError):
-            return jsonify({"error": "'postback' must be a number"}), 400
-    if body.get("seed") is not None:
-        try:
-            cfg["seed"] = int(body["seed"])
-        except (TypeError, ValueError):
-            return jsonify({"error": "'seed' must be an integer"}), 400
-    cfg["reps"] = 1                       # no seed-averaging over the web (latency)
-    try:
-        return jsonify(flywheel.simulate(cfg))
-    except Exception as e:
-        app.logger.exception("flywheel failed")
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
 
 @app.route("/api/chat", methods=["POST"])
