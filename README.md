@@ -99,6 +99,16 @@ its-media-today/
 - Node.js 18+
 - An `ANTHROPIC_API_KEY`
 
+### Quick start
+
+```bash
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > backend/.env
+./start_local.sh            # bootstraps venv/deps, builds the SPA, serves http://localhost:5000
+```
+
+`./start_local.sh --dev` runs hot-reload dev mode (Vite on :5173 + Flask on :5000);
+`./start_local.sh --rebuild` forces a fresh SPA build first. Or do the steps manually:
+
 ### 1. Set your API key
 
 ```bash
