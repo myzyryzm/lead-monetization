@@ -172,8 +172,6 @@ def true_prob(lead, offer):
     elif s > 180: p -= 0.02
 
     # commitment_level drives conversion (causal: more effort -> fewer convert).
-    # This REPLACES the old payout term — payout is invisible to the consumer
-    # and belongs only in EV = P * payout, not in P itself.
     p += COMMITMENT_EFFECT[offer["commitment_level"]]
 
     p += rng.normal(0, 0.02)
