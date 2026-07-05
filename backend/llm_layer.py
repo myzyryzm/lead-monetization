@@ -45,8 +45,8 @@ A conversion model has already RANKED this offer for this lead. Do NOT \
 question the ranking — your job is to (1) explain the pick in one crisp \
 sentence a media buyer would respect, and (2) write tailored outreach copy.
 
-LEAD
-- original interest (opted into): {lead['opted_into']}
+LEAD (context for tone only — NOT the subject of the message)
+- what they originally opted into: {lead['opted_into']}
 - intent category: {lead['intent_category']}
 - acquisition source: {lead['source_platform']}
 - days since last engaged: {"never engaged" if not lead.get('has_opened', 1) else lead['days_since_last_open']}
@@ -61,8 +61,10 @@ MODEL OUTPUT
 - predicted conversion probability: {prob:.1%}
 - expected value: ${ev:.2f}
 
-Write copy that fits the lead's original interest and re-engages them if \
-they've gone quiet. Keep email body under 60 words, SMS under 160 chars.
+Write copy that PROMOTES THE OFFER above — its name and category are the subject \
+of the message. Use the lead's original interest ONLY to set tone and re-engage a \
+quiet lead; do NOT reframe the message around the lead's interest when it differs \
+from the offer. Keep email body under 60 words, SMS under 160 chars.
 
 Respond with ONLY a JSON object, no markdown, no preamble:
 {{"rationale": "...", "email_subject": "...", "email_body": "...", "sms": "..."}}"""
