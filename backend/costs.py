@@ -39,6 +39,7 @@ def _score_lead_for_offer(model, lead: dict, offer: dict) -> dict:
         "intent_match": match,
         "days_since_signup": lead["days_since_signup"],
         "total_opens": lead["total_opens"],
+        "has_opened": lead["has_opened"],
         "days_since_last_open": lead["days_since_last_open"],
         "commitment_level": offer["commitment_level"],
     }

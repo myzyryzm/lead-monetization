@@ -11,6 +11,9 @@ backend/.env
 # Persisted model weights (regenerated on first run)
 backend/model.pkl
 
+# Campaign ledger (SQLite + WAL siblings; recreated on first stage)
+backend/campaigns.db*
+
 # Frontend
 frontend/node_modules/
 frontend/dist/

@@ -156,6 +156,9 @@ def tool_recommend_offers_for_lead(intent_category, source_platform=None,
         lead["source_platform"] = source_platform
     if days_since_last_open is not None:
         lead["days_since_last_open"] = int(days_since_last_open)
+        # specifying recency implies at least one open — keep the lead consistent
+        lead["has_opened"] = 1
+        lead["total_opens"] = max(int(lead["total_opens"]), 1)
 
     model = get_model()
     offers = data.get_offers()
@@ -169,6 +172,7 @@ def tool_recommend_offers_for_lead(intent_category, source_platform=None,
             "geo_state": lead["geo_state"],
             "days_since_last_open": int(lead["days_since_last_open"]),
             "total_opens": int(lead["total_opens"]),
+            "has_opened": int(lead["has_opened"]),
         },
         "recommendations": recs.to_dict("records"),
     }
