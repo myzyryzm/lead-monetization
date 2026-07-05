@@ -49,7 +49,7 @@ LEAD
 - original interest (opted into): {lead['opted_into']}
 - intent category: {lead['intent_category']}
 - acquisition source: {lead['source_platform']}
-- days since last engaged: {lead['days_since_last_open']}
+- days since last engaged: {"never engaged" if not lead.get('has_opened', 1) else lead['days_since_last_open']}
 
 OFFER
 - name: {offer['offer_name']}

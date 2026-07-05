@@ -101,9 +101,16 @@ def make_leads(n):
         days_since_signup = int(rng.integers(0, 365))
         # engagement: most leads are lukewarm-to-cold (realistic)
         total_opens = int(rng.poisson(2))
-        # dormancy correlates loosely with signup age
-        base_dormancy = rng.integers(0, 120)
-        days_since_last_open = int(min(base_dormancy + days_since_signup // 4, 365))
+        has_opened = int(total_opens > 0)
+        if has_opened:
+            # dormancy correlates loosely with signup age; an open can't
+            # predate the signup, so clamp to days_since_signup
+            base_dormancy = rng.integers(0, 120)
+            days_since_last_open = int(min(base_dormancy + days_since_signup // 4,
+                                           days_since_signup))
+        else:
+            # never opened -> "no open since we got them"
+            days_since_last_open = days_since_signup
         rows.append({
             "lead_id": f"L{i:05d}",
             "email": f"user{i}@example.com",
@@ -118,6 +125,7 @@ def make_leads(n):
             "device": rng.choice(DEVICES),
             "days_since_signup": days_since_signup,
             "total_opens": total_opens,
+            "has_opened": has_opened,
             "days_since_last_open": days_since_last_open,
         })
     return pd.DataFrame(rows)
@@ -159,10 +167,15 @@ def true_prob(lead, offer):
     m = MATCH[lead["intent_category"]][offer["category"]]
     p += {"match":0.12, "related":0.05, "mismatch":0.0}[m]
 
-    d = lead["days_since_last_open"]
-    if d <= 7: p += 0.05
-    elif d <= 30: p += 0.02
-    elif d > 90: p -= 0.02
+    # recency only means something if they've actually opened; never-openers
+    # get a flat penalty instead of the recency bumps
+    if lead["has_opened"]:
+        d = lead["days_since_last_open"]
+        if d <= 7: p += 0.05
+        elif d <= 30: p += 0.02
+        elif d > 90: p -= 0.02
+    else:
+        p -= 0.03
     p += min(lead["total_opens"], 10) * 0.003
 
     p += SOURCE_QUALITY[lead["source_platform"]]
@@ -196,6 +209,7 @@ def make_pairs(leads, offers):
                 "device": lead["device"],
                 "days_since_signup": lead["days_since_signup"],
                 "total_opens": lead["total_opens"],
+                "has_opened": lead["has_opened"],
                 "days_since_last_open": lead["days_since_last_open"],
                 # offer features
                 "offer_category": offer["category"],

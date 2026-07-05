@@ -32,7 +32,8 @@ CATEGORICAL = ["source_platform", "intent_category", "geo_state",
 # payout REMOVED from model features (not causal to the consumer; lives in EV only).
 # commitment_level added as the causal offer feature. Treated as numeric here
 # so logistic regression can use its ordinal structure directly.
-NUMERIC = ["days_since_signup", "total_opens", "days_since_last_open", "commitment_level"]
+NUMERIC = ["days_since_signup", "total_opens", "has_opened",
+           "days_since_last_open", "commitment_level"]
 
 X = df[CATEGORICAL + NUMERIC]
 

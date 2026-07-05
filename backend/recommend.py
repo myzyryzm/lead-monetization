@@ -25,7 +25,8 @@ from sklearn.calibration import CalibratedClassifierCV
 CATEGORICAL = ["source_platform", "intent_category", "geo_state",
                "device", "offer_category", "intent_match"]
 # payout is NOT a model feature (not causal to consumer) — used only for EV.
-NUMERIC = ["days_since_signup", "total_opens", "days_since_last_open", "commitment_level"]
+NUMERIC = ["days_since_signup", "total_opens", "has_opened",
+           "days_since_last_open", "commitment_level"]
 
 # Match matrix (same as the generator) so we can compute intent_match
 # for any lead x offer pairing at prediction time.
@@ -78,6 +79,7 @@ def _score_leads_vectorized(model, offer, leads_df):
         "intent_match": matches.values,
         "days_since_signup": leads_df["days_since_signup"].values,
         "total_opens": leads_df["total_opens"].values,
+        "has_opened": leads_df["has_opened"].values,
         "days_since_last_open": leads_df["days_since_last_open"].values,
         "commitment_level": offer["commitment_level"],
     })
@@ -88,7 +90,9 @@ def _score_leads_vectorized(model, offer, leads_df):
 def _rationale(lead, offer, match):
     """Rule-based placeholder. The LLM replaces this in the full build."""
     bits = [f"{match} (lead intent '{lead['intent_category']}' vs offer '{offer['category']}')"]
-    if lead["days_since_last_open"] <= 7:
+    if not lead["has_opened"]:
+        bits.append("never opened — cold outreach")
+    elif lead["days_since_last_open"] <= 7:
         bits.append("recently engaged")
     elif lead["days_since_last_open"] > 90:
         bits.append("dormant — re-engagement risk")
@@ -111,6 +115,7 @@ def recommend(model, lead: dict, offers: pd.DataFrame, k=3):
             "intent_match": match,
             "days_since_signup": lead["days_since_signup"],
             "total_opens": lead["total_opens"],
+            "has_opened": lead["has_opened"],
             "days_since_last_open": lead["days_since_last_open"],
             "commitment_level": offer["commitment_level"],
         }
