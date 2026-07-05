@@ -59,18 +59,41 @@ def send_email_live(subject: str, body: str, intended_lead_id: str) -> str:
     return demo
 
 
-def send_sms_live(text: str, intended_lead_id: str) -> str:
-    """Send one real SMS via Twilio — always to DEMO_RECIPIENT_PHONE. Raises on failure."""
+def _post_twilio(body: str):
     sid = os.environ["TWILIO_ACCOUNT_SID"]
-    demo = os.environ["DEMO_RECIPIENT_PHONE"]
-
-    resp = requests.post(
+    return requests.post(
         _TWILIO_URL.format(sid=sid),
         auth=(sid, os.environ["TWILIO_AUTH_TOKEN"]),
-        data={"From": os.environ["TWILIO_FROM_NUMBER"], "To": demo,
-              "Body": f"[DEMO {intended_lead_id}] {text}"[:1600]},
+        data={"From": os.environ["TWILIO_FROM_NUMBER"],
+              "To": os.environ["DEMO_RECIPIENT_PHONE"],
+              "Body": body[:1600]},
         timeout=30)
-    resp.raise_for_status()
+
+
+def _twilio_error(resp) -> tuple:
+    try:
+        err = resp.json()
+        return err.get("code"), f"Twilio error {err.get('code')}: {err.get('message')}"
+    except ValueError:
+        return None, resp.text[:300]
+
+
+def send_sms_live(text: str, intended_lead_id: str) -> str:
+    """Send one real SMS via Twilio — always to DEMO_RECIPIENT_PHONE. Raises on failure."""
+    demo = os.environ["DEMO_RECIPIENT_PHONE"]
+
+    resp = _post_twilio(f"[DEMO {intended_lead_id}] {text}")
+    code, detail = (None, None) if resp.ok else _twilio_error(resp)
+    if code == 572006:
+        # New-style Twilio trial: the body must be a predefined template NAME
+        # (Twilio substitutes its canned text). The drafted copy can't go over
+        # the wire until the account is upgraded — it still lives in the ledger.
+        resp = _post_twilio(os.environ.get("TWILIO_TRIAL_TEMPLATE",
+                                           "sms_marketing_promotions"))
+        if not resp.ok:
+            code, detail = _twilio_error(resp)
+    if not resp.ok:
+        raise RuntimeError(f"HTTP {resp.status_code} — {detail}")
     return demo
 
 

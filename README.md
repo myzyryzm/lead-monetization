@@ -128,7 +128,16 @@ send is recorded in the ledger, nothing leaves the machine). To demo real sends,
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | live SMS | — |
 | `DEMO_RECIPIENT_EMAIL`, `DEMO_RECIPIENT_PHONE` | the **only** live destinations (phone must be Twilio-trial-verified) | — |
 | `LIVE_SEND_CAP` | how many top-EV sends go live per campaign | `1` (clamped 0–3) |
+| `TWILIO_TRIAL_TEMPLATE` | canned template name for trial-account SMS (see below) | `sms_marketing_promotions` |
 | `CAMPAIGN_DB_PATH` | ledger location override | `backend/campaigns.db` |
+
+> **Twilio trial caveat:** new Twilio trial accounts can't send free-form SMS text (error 572006) —
+> only Twilio's predefined templates, passed by *name* in the body (e.g. `sms_marketing_promotions`,
+> which arrives as a canned "FLASH SALE: 25% off…" text). `senders.py` tries the real drafted copy
+> first and automatically falls back to the template on a trial account; the drafted copy is always
+> recorded in the ledger either way. Upgrading to pay-as-you-go lifts the template restriction, but
+> real US delivery of custom copy then requires A2P 10DLC sender registration — exactly the kind of
+> compliance step a production ESP integration handles for you.
 
 Live mode is **sandbox-redirected**: the send functions physically cannot address anyone but
 `DEMO_RECIPIENT_*` (your own inbox/phone), and at most `LIVE_SEND_CAP` messages go live per
