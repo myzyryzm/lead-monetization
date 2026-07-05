@@ -9,6 +9,8 @@ target, projected revenue, and the email/SMS copy to send.
 - **React frontend** — an assumptions panel that explains the model and a back-and-forth chat.
 - **Flask backend** — serve the built frontend and answer chat queries.
 - **AI agent** — deciphers the request, calls the ML tools (never invents numbers), and replies in natural language.
+- **MCP dispatch layer** — a real MCP server (simulated ESP + optional live Gmail/Twilio sending)
+  that stages campaigns and dispatches them only after in-chat human approval.
 
 > **Note:** All data (2000 leads, 15 offers, every conversion outcome) is **randomly generated**.
 > This is an MVP demonstrating the agentic integration, not a system trained on real data. See
@@ -29,16 +31,19 @@ target, projected revenue, and the email/SMS copy to send.
                                                                        ▼
                                               ┌────────────────────────────────────────┐
                                               │  Agent (agent.py) — claude-opus-4-8      │
-                                              │  tool-use loop over 4 tools:             │
+                                              │  tool-use loop over 4 native tools:      │
                                               │   list_offers · estimate_campaign        │
                                               │   recommend_offers_for_lead · draft_msg  │
-                                              └───────────────┬──────────────────────────┘
-                                                              ▼
-                          ┌───────────────────────────────────────────────────────────┐
-                          │  ML + LLM engine (unchanged core)                          │
-                          │   recommend.py  costs.py  llm_layer.py                     │
-                          │   model_store.py → cached, persisted model.pkl             │
-                          └───────────────────────────────────────────────────────────┘
+                                              │  + 4 campaign tools served over MCP      │
+                                              └───────┬──────────────────┬───────────────┘
+                                                      ▼                  ▼ MCP (stdio, JSON-RPC)
+                  ┌───────────────────────────────────────────┐  ┌──────────────────────────────┐
+                  │  ML + LLM engine (unchanged core)          │  │  MCP server (mcp_server.py)  │
+                  │   recommend.py  costs.py  llm_layer.py     │  │  stage · dispatch · status   │
+                  │   model_store.py → cached model.pkl        │  │  ledger.py → campaigns.db    │
+                  └────────────────────────────────────────────┘  │  senders.py → Gmail/Twilio   │
+                                                                  │  (sandbox-redirected + capped)│
+                                                                  └──────────────────────────────┘
 ```
 
 **The core design principle** (from the engine): _the model does the math; the LLM does the language._
@@ -62,6 +67,10 @@ its-media-today/
 │   ├── recommend.py          ← lead → ranked offers by EV  (+ vectorized scoring)
 │   ├── costs.py              ← offer → who to send to, under a send budget/EV floor
 │   ├── llm_layer.py          ← email/SMS copy generation (claude-haiku-4-5 + fallback)
+│   ├── mcp_server.py         ← MCP server: stage/dispatch campaigns (the "ESP side")
+│   ├── mcp_client.py         ← sync bridge: spawns the server, merges its tools
+│   ├── ledger.py             ← SQLite outbox: campaigns + per-send status
+│   ├── senders.py            ← Gmail SMTP / Twilio transports, sandbox-redirected
 │   ├── generate.py, train.py ← synthetic-data generation & standalone model training
 │   ├── leads.csv, offers.csv, pairs.csv   ← generated data
 │   ├── requirements.txt
@@ -97,6 +106,24 @@ echo 'ANTHROPIC_API_KEY=sk-ant-...' > backend/.env
 ```
 
 `backend/.env` is gitignored and loaded automatically via `python-dotenv`.
+
+**Optional — live sending.** With no extra config, campaign dispatch runs fully simulated (every
+send is recorded in the ledger, nothing leaves the machine). To demo real sends, add to
+`backend/.env`:
+
+| Variable | For | Default |
+| --- | --- | --- |
+| `LIVE_SEND` | opt-in gate for live mode | `0` (all simulated) |
+| `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD` | live email (app password requires 2FA) | — |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | live SMS | — |
+| `DEMO_RECIPIENT_EMAIL`, `DEMO_RECIPIENT_PHONE` | the **only** live destinations (phone must be Twilio-trial-verified) | — |
+| `LIVE_SEND_CAP` | how many top-EV sends go live per campaign | `1` (clamped 0–3) |
+| `CAMPAIGN_DB_PATH` | ledger location override | `backend/campaigns.db` |
+
+Live mode is **sandbox-redirected**: the send functions physically cannot address anyone but
+`DEMO_RECIPIENT_*` (your own inbox/phone), and at most `LIVE_SEND_CAP` messages go live per
+campaign — the remainder are simulated. Missing credentials for a channel silently keep that
+channel simulated.
 
 ### 2. Install & build
 
@@ -144,6 +171,10 @@ The chat handles both directions of the monetization decision. Try:
 - **Reverse lookup:** _"Best offers for a finance lead from Google search who last opened 5 days ago?"_
 - **Copy drafting:** _"Draft an email and SMS for a \$30 health paid-trial offer."_
 - **Budget/floor targeting:** _"For a \$6 sweepstakes email-submit offer, who clears a \$0.50/lead EV floor?"_
+- **Campaign dispatch:** _"Stage an email campaign for a \$40 insurance quote-request offer to the
+  top 200 leads."_ — the agent drafts copy, stages the campaign, and presents a summary (recipients,
+  projected revenue, mode, copy). Reply _"yes, send it"_ and it dispatches; ask _"what's the status
+  of that campaign?"_ afterward.
 
 The agent states the **assumptions it made** (the assumed `commitment_level` and channel) and cites
 tool-derived figures — e.g. _"~\$1,721 from 500 email sends, 1.83× a random 500."_
@@ -169,7 +200,7 @@ inside a single request and are never round-tripped to the client.
 
 ---
 
-## The agent (4 tools)
+## The agent (4 native tools + 4 MCP tools)
 
 `agent.py` runs a manual Anthropic tool-use loop (`claude-opus-4-8`, adaptive thinking, iteration cap 8):
 
@@ -180,13 +211,44 @@ inside a single request and are never round-tripped to the client.
 
 Copy generation stays on the cheaper `claude-haiku-4-5`; the reasoning/orchestration agent is on Opus 4.8.
 
+### Campaign dispatch over MCP
+
+The four campaign tools are not native — they're served by a real **MCP server**
+(`mcp_server.py`, Python `mcp` SDK, stdio transport) that the backend spawns as a subprocess and
+connects to as an MCP client (`mcp_client.py`). Its tool schemas are fetched over the protocol and
+merged into the agent's tool list at runtime:
+
+- **`stage_campaign`** — scores the leads for an offer, resolves the target segment, records it in
+  the SQLite ledger with the drafted copy. **Sends nothing.**
+- **`dispatch_campaign`** — executes a staged campaign, exactly once (an atomic
+  `staged → dispatched` claim in SQLite guards double-sends even across processes).
+- **`get_campaign_status`** / **`list_campaigns`** — report from the ledger.
+
+The flow is **two-phase with a human gate**: the agent estimates → drafts copy → stages → presents
+the summary and stops; it may dispatch only after the user explicitly approves in a later message.
+The approval is prompt-enforced, but dispatch-once is *server*-enforced.
+
+The MCP boundary carries the trust story:
+
+- The **agent process** holds `ANTHROPIC_API_KEY` and never sees a full email/phone — the server
+  masks every contact in tool results (`u***7@example.com`).
+- The **MCP server** holds the SMTP/Twilio credentials and does the `lead_id → contact` join; it
+  never talks to an LLM. In live mode it physically can't address anyone but `DEMO_RECIPIENT_*`.
+
 ---
 
 ## Notes & deferred work
 
 - **Model persistence** pins `scikit-learn==1.9.0` so `model.pkl` unpickles under the same version; it retrains automatically if the pickle can't load.
 - **Performance:** lead scoring is vectorized (one `predict_proba` over all leads per offer) — output is identical to the original per-lead loop, just far faster on the chat hot path.
-- **Not built for this MVP** (see `backend/README.md`): token streaming, prompt caching, a production WSGI server (gunicorn/waitress), and connecting the agent to a real ESP/SMS platform for dispatch.
+- **Campaign ledger** (`backend/campaigns.db`) is SQLite in WAL mode — under gunicorn each worker
+  spawns its own MCP server subprocess, and SQLite arbitrates the shared outbox. In Docker it lives
+  on the container's writable layer (ephemeral across deploys — fine for a demo).
+- **Graceful degradation:** if the MCP server fails to start, chat still works with the four native
+  tools; the campaign tools simply don't appear.
+- **Not built for this MVP** (see `backend/README.md`): token streaming, prompt caching, and a
+  production ESP integration (the MCP dispatch layer sends via Gmail/Twilio under a sandbox
+  redirect — a real deployment would swap `senders.py` for the company's ESP/SMS platform API).
 
 ---
 
@@ -244,10 +306,11 @@ postback/attribution loss. Alongside this, add conversion-history features (prio
 recency, last category) — proven responders convert at multiples of the base rate, and it's likely
 the single biggest model lift available.
 
-**2. Close the execution loop — MCP dispatch.** Connect the agent to the actual ESP/SMS platform via
-an MCP server so "who should get this offer?" becomes "queue it up" — with a human-approval gate
-before anything sends. This plugs directly into the MCP work the team is already doing on the
-ad-upload side.
+**2. Close the execution loop — MCP dispatch.** _(Now built in MVP form — see "Campaign dispatch
+over MCP" above.)_ An MCP server stages campaigns and dispatches them after an in-chat
+human-approval gate, with real sends via Gmail/Twilio under a sandbox redirect. The production
+step is swapping the demo transports for the company's actual ESP/SMS platform API — which plugs
+directly into the MCP work the team is already doing on the ad-upload side.
 
 **3. Close the business loop — feed monetization back into media buying.** Once the model knows the
 expected lifetime revenue of a lead by source, campaign, and creative, you can score _acquisition_

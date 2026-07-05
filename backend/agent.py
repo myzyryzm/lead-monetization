@@ -5,10 +5,11 @@ Division of labor (the whole architecture in one sentence):
   the MODEL does the math (P(convert), EV, ranking, who-to-send);
   the LLM parses messy input, orchestrates the tools, and writes the answer.
 
-`run_agent(messages)` runs an Anthropic tool-use loop over the four tools below
-and returns the final natural-language reply plus the updated PLAIN-text history
-(the internal thinking/tool_use/tool_result blocks live only inside one request
-and are never sent back to the client).
+`run_agent(messages)` runs an Anthropic tool-use loop over the four native tools
+below plus the campaign-dispatch tools served over MCP (see mcp_client.py /
+mcp_server.py) and returns the final natural-language reply plus the updated
+PLAIN-text history (the internal thinking/tool_use/tool_result blocks live only
+inside one request and are never sent back to the client).
 """
 
 import json
@@ -17,6 +18,7 @@ from anthropic import Anthropic
 
 import data
 import costs
+import mcp_client
 from model_store import get_model
 from recommend import recommend, MATCH
 from llm_layer import generate_copy
@@ -74,7 +76,20 @@ tool defaults to 2 (quote_request) — either way, STATE which level you assumed
 then a short why. Use the leads' real numbers, not round guesses.
 
 Use `list_offers` to ground yourself in the catalog when the user names an offer \
-by title or asks what's available."""
+by title or asks what's available.
+
+CAMPAIGN DISPATCH (the real send layer, via the campaign tools):
+- `stage_campaign` prepares a campaign but sends NOTHING. Draft the copy FIRST \
+with `draft_message`, then pass the subject/body (or sms text) into `stage_campaign`.
+- After staging, present the summary to the user: recipient count, projected \
+revenue, the mode (simulated vs live-sandbox — live sends are redirected to the \
+operator's own inbox/phone and capped), and the copy. Then STOP and ask for approval.
+- You may call `dispatch_campaign` ONLY after the user explicitly approves in a \
+message sent AFTER they saw the staged summary (e.g. "yes, send it"). NEVER stage \
+and dispatch in the same turn. If approval is ambiguous, ask again. Dispatching \
+without explicit approval is forbidden.
+- You never see real contact info — recipients are shown masked by design.
+- Use `get_campaign_status` / `list_campaigns` to report on past campaigns."""
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +324,8 @@ TOOLS = [
 def _run_tool(name: str, args: dict):
     fn = _TOOL_FNS.get(name)
     if fn is None:
+        if name in mcp_client.tool_names():
+            return mcp_client.call_tool(name, args)
         return {"error": f"unknown tool: {name}"}
     try:
         return fn(**args)
@@ -331,7 +348,7 @@ def run_agent(messages: list) -> dict:
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
             thinking={"type": "adaptive"},
-            tools=TOOLS,
+            tools=TOOLS + mcp_client.get_tool_schemas(),
             messages=working,
         )
 
@@ -344,7 +361,9 @@ def run_agent(messages: list) -> dict:
                     tr = {
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": json.dumps(out, default=str),
+                        # MCP tool results are already JSON text
+                        "content": out if isinstance(out, str)
+                                   else json.dumps(out, default=str),
                     }
                     if isinstance(out, dict) and out.get("error"):
                         tr["is_error"] = True
