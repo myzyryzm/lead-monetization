@@ -62,8 +62,10 @@ revenue for that K.
 YOUR RULES:
 - The model does the math. NEVER invent probabilities, EV, counts, revenue, or \
 lift — ALWAYS call a tool and cite its numbers.
-- When the user describes an offer, extract the `category` and `payout`. Infer \
-`commitment_level` from their words using the ladder above; if it's unstated, the \
+- When the user describes an offer, extract the `category` and `payout`, and its \
+specific product name (e.g. "auto insurance") — pass that to `draft_message` as \
+`offer_name` so the copy is framed around the real product, not the generic category. \
+Infer `commitment_level` from their words using the ladder above; if it's unstated, the \
 tool defaults to 2 (quote_request) — either way, STATE which level you assumed.
 - Default the channel to email and state it. If the user names an EV floor \
 ("at least $X/lead") pass it as `min_ev`. If they name a send budget, pass \
@@ -179,8 +181,8 @@ def tool_recommend_offers_for_lead(intent_category, source_platform=None,
 
 
 def tool_draft_message(category, payout, commitment_level=None,
-                       intent_category=None) -> dict:
-    offer = _build_offer(category, payout, commitment_level)
+                       intent_category=None, offer_name=None) -> dict:
+    offer = _build_offer(category, payout, commitment_level, offer_name=offer_name)
     lead = _sample_lead(intent_category or category)
     model = get_model()
 
@@ -190,6 +192,7 @@ def tool_draft_message(category, payout, commitment_level=None,
 
     return {
         "offer": {
+            "offer_name": offer["offer_name"],
             "category": offer["category"],
             "payout": offer["payout"],
             "commitment_level": offer["commitment_level"],
@@ -278,13 +281,21 @@ TOOLS = [
     {
         "name": "draft_message",
         "description": "Draft email subject/body + an SMS for a representative lead "
-                       "and a given offer. Uses the copy model; it never re-ranks.",
+                       "and a given offer. The copy is framed around the OFFER (pass "
+                       "offer_name for the specific product, e.g. 'auto insurance'); the "
+                       "lead only sets tone. Uses the copy model; it never re-ranks.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "category": {"type": "string", "enum": data.CATEGORIES},
                 "payout": {"type": "number"},
                 "commitment_level": {"type": "integer", "minimum": 1, "maximum": 5},
+                "offer_name": {"type": "string",
+                               "description": "The specific product the user described, "
+                                              "e.g. 'auto insurance quote', 'SafeAuto auto "
+                                              "policy'. Pass it through verbatim so the copy "
+                                              "is framed around the real product, not the "
+                                              "generic category."},
                 "intent_category": {"type": "string", "enum": data.CATEGORIES,
                                     "description": "Intent of the representative lead; "
                                                    "defaults to the offer category."},
